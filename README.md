@@ -3,15 +3,21 @@ EarthScope-Oceans Data Products
 Small tools for generating public per-float location/status tables from
 normalized mermaid-records JSONL outputs.
 
-The normalized records under ~/mermaid/records/ are the authoritative input.
-Raw MERMAID files are never read or parsed.
+Current version: 0.1.0
+
+The raw source files under ~/mermaid/server_everyone/ are the source of truth
+for input data. Build tables from a normalized JSONL output produced from a
+known mermaid-records run over that raw input. The current default normalized
+output location, ~/mermaid/records/, is in flux and should not be treated as a
+stable baseline comparator against ~/mermaid/esoloc/. This repo reads
+normalized JSONL only and never parses raw MERMAID files directly.
 
 Generate Tables
 
 ./scripts/build_location_tables.py --output tables
 
-This reads ~/mermaid/records/ by default and currently consumes these
-normalized record families:
+Pass --root to the normalized JSONL root you want to publish from. The builder
+currently consumes these normalized record families:
 
 log_gps_records
 log_battery_records
@@ -64,6 +70,17 @@ Useful options:
 --vital-seconds N       maximum battery/pressure join offset (default: 3600)
 --status-seconds N      maximum Iridium command/upload join offset (default: 1800)
 
+Install Development Dependencies
+
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
+
+Run Tests
+
+python -m pytest
+
 Compare Historical Output
 
 ~/mermaid/esoloc/ is a legacy derived product of unknown provenance. It is
@@ -91,4 +108,5 @@ See docs/vit2tbl_product_design.md for the
 column mappings, GPS row-anchor policy, join strategy, missing-data contract,
 and known limitations.
 
-All scripts use only the Python standard library.
+The production scripts currently use the Python standard library. Development
+and regression tests use the dependencies listed in requirements-dev.txt.

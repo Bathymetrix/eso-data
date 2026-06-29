@@ -41,6 +41,25 @@ def timestamp(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
+def has_usable_log_epoch(row: dict) -> bool:
+    value = row.get("log_epoch_time")
+    if value is None:
+        return True
+    try:
+        return int(value) >= 0
+    except (TypeError, ValueError):
+        return False
+
+
+def record_timestamp(row: dict, field: str = "record_time") -> datetime | None:
+    if not has_usable_log_epoch(row):
+        return None
+    try:
+        return timestamp(row.get(field))
+    except ValueError:
+        return None
+
+
 def log_coordinate(value: str) -> float:
     match = LOG_COORD.fullmatch(value)
     if not match:
@@ -63,7 +82,7 @@ def gps_events(directory: Path) -> tuple[str, list[Event]]:
     positions: list[Event] = []
     for row in records(directory, "log_gps_records") or ():
         station = row.get("instrument_id") or station
-        time = timestamp(row.get("record_time"))
+        time = record_timestamp(row)
         raw = row.get("raw_values") or {}
         if time and row.get("gps_record_kind") == "fix_position":
             positions.append(
@@ -79,7 +98,7 @@ def gps_events(directory: Path) -> tuple[str, list[Event]]:
         station = row.get("instrument_id") or station
         if row.get("environment_kind") != "gpsinfo":
             continue
-        time = timestamp(row.get("gpsinfo_date"))
+        time = record_timestamp(row, "gpsinfo_date")
         raw = row.get("raw_values") or {}
         if time and raw.get("lat") is not None and raw.get("lon") is not None:
             positions.append(
@@ -98,7 +117,7 @@ def dop_events(directory: Path) -> list[Event]:
     for row in records(directory, "log_gps_records") or ():
         if row.get("gps_record_kind") != "dop":
             continue
-        time = timestamp(row.get("record_time"))
+        time = record_timestamp(row)
         raw = row.get("raw_values") or {}
         if time and raw.get("hdop") is not None and raw.get("vdop") is not None:
             result.append(Event(time, row.get("source_file") or "", (float(raw["hdop"]), float(raw["vdop"])), "log_gps_records"))
@@ -108,7 +127,7 @@ def dop_events(directory: Path) -> list[Event]:
 def battery_events(directory: Path) -> list[Event]:
     result = []
     for row in records(directory, "log_battery_records") or ():
-        time = timestamp(row.get("record_time"))
+        time = record_timestamp(row)
         voltage = row.get("voltage_mv")
         if voltage is None or not time:
             continue
@@ -129,7 +148,7 @@ def pressure_events(directory: Path) -> tuple[list[Event], list[Event]]:
     internal = []
     external = []
     for row in records(directory, "log_pressure_temperature_records") or ():
-        time = timestamp(row.get("record_time"))
+        time = record_timestamp(row)
         if not time:
             continue
         source = row.get("source_file") or ""
@@ -153,7 +172,14 @@ def iridium_events(directory: Path) -> tuple[list[Event], list[Event]]:
     for row in records(directory, "log_iridium_records") or ():
         for event in row.get("iridium_events") or (row,):
             kind = event.get("iridium_event_kind") or event.get("transmission_kind")
-            time = timestamp(event.get("record_time") or row.get("record_time"))
+            source_event = dict(row)
+            source_event.update(event)
+            if not has_usable_log_epoch(source_event):
+                continue
+            try:
+                time = timestamp(event.get("record_time") or row.get("record_time"))
+            except ValueError:
+                time = None
             source = event.get("source_file") or row.get("source_file") or ""
             if not time:
                 continue

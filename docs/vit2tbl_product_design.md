@@ -2,10 +2,14 @@
 
 ## Authority And Scope
 
-The product is derived only from normalized JSONL under
-~/mermaid/records/. Those records are authoritative. The generated tables in
-~/mermaid/esoloc/ are useful comparison material, but they do not
-decide row cadence or values.
+The product is derived only from normalized JSONL. The raw source files under
+~/mermaid/server_everyone/ are the source of truth for input data used to build
+that normalized JSONL. Any normalized output directory, including the current
+default ~/mermaid/records/, is a generated artifact from a particular
+mermaid-records run; because that output is currently in flux, it should not be
+treated as a stable baseline comparator against ~/mermaid/esoloc/. The
+generated tables in ~/mermaid/esoloc/ are useful comparison material, but they
+do not decide row cadence or values.
 
 The normalized families are asynchronous event streams. GPS, DOP, battery,
 pressure, command, and upload observations have different timestamps and row
