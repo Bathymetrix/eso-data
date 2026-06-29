@@ -6,17 +6,12 @@ from __future__ import annotations
 import argparse
 import bisect
 import json
-import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 
-VBAT = re.compile(r"\bVbat\s+(-?\d+)mV\s+\(min\s+(-?\d+)mV\)", re.I)
-PINT = re.compile(r"\b(?:Pint|internal pressure)\s+(-?\d+)Pa\b", re.I)
-PEXT = re.compile(r"\bPext\s*([+-]?\d+)mbar\s+\(rng\s+(-?\d+)\s*mbar\)", re.I)
-COMMAND = re.compile(r"^(\d+)\s+cmd\(s\) received$", re.I)
 LOG_COORD = re.compile(r"([NSEW])(\d+)deg([\d.]+)mn", re.I)
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
@@ -27,7 +22,7 @@ class Event:
     source: str
     values: tuple
     family: str = "log"
-    equivalents: tuple[tuple[str, str, str], ...] = ()
+    preference: int = 0
 
 
 def records(directory: Path, family: str):
@@ -63,36 +58,23 @@ def mer_coordinate(value: str) -> float:
     return sign * (degrees + (raw - degrees * 100) / 60.0)
 
 
-def distance_m(a: Event, b: Event) -> float:
-    lat1, lon1 = map(math.radians, a.values[:2])
-    lat2, lon2 = map(math.radians, b.values[:2])
-    dlat, dlon = lat2 - lat1, lon2 - lon1
-    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    return 12_742_000 * math.asin(math.sqrt(h))
-
-
-def gps_events(directory: Path) -> tuple[str, list[Event], int]:
+def gps_events(directory: Path) -> tuple[str, list[Event]]:
     station = ""
-    dops: dict[tuple[str, datetime], tuple[float, float]] = {}
-    fixes: list[Event] = []
+    positions: list[Event] = []
     for row in records(directory, "log_gps_records") or ():
         station = row.get("instrument_id") or station
         time = timestamp(row.get("record_time"))
-        source = row.get("source_file") or ""
         raw = row.get("raw_values") or {}
-        if not time:
-            continue
-        if row.get("gps_record_kind") == "dop":
-            dops[(source, time)] = (float(raw["hdop"]), float(raw["vdop"]))
-        elif row.get("gps_record_kind") == "fix_position":
-            fixes.append(Event(time, source, (log_coordinate(raw["latitude"]), log_coordinate(raw["longitude"])), "log_gps_records"))
+        if time and row.get("gps_record_kind") == "fix_position":
+            positions.append(
+                Event(
+                    time,
+                    row.get("source_file") or "",
+                    (log_coordinate(raw["latitude"]), log_coordinate(raw["longitude"])),
+                    "log_gps_records",
+                )
+            )
 
-    log_positions = [Event(x.time, x.source, x.values + dops.get((x.source, x.time), (-1.0, -1.0)), x.family) for x in fixes]
-    log_positions = list({(x.time, x.values[0], x.values[1]): x for x in log_positions}.values())
-    log_times = [x.time for x in sorted(log_positions, key=lambda x: x.time)]
-    sorted_logs = sorted(log_positions, key=lambda x: x.time)
-
-    mer_positions: list[Event] = []
     for row in records(directory, "mer_environment_records") or ():
         station = row.get("instrument_id") or station
         if row.get("environment_kind") != "gpsinfo":
@@ -100,122 +82,176 @@ def gps_events(directory: Path) -> tuple[str, list[Event], int]:
         time = timestamp(row.get("gpsinfo_date"))
         raw = row.get("raw_values") or {}
         if time and raw.get("lat") is not None and raw.get("lon") is not None:
-            mer_positions.append(Event(time, row.get("source_file") or "", (mer_coordinate(raw["lat"]), mer_coordinate(raw["lon"]), -1.0, -1.0), "mer_environment_records"))
-    mer_positions = list({(x.time, x.values[0], x.values[1]): x for x in mer_positions}.values())
-
-    mer_only = []
-    for item in mer_positions:
-        index = bisect.bisect_left(log_times, item.time)
-        nearby = sorted_logs[max(0, index - 2) : index + 2]
-        duplicates = [
-            other
-            for other in nearby
-            if abs((item.time - other.time).total_seconds()) <= 90 and distance_m(item, other) <= 500
-        ]
-        if duplicates:
-            match = min(duplicates, key=lambda other: abs((item.time - other.time).total_seconds()))
-            match_index = sorted_logs.index(match)
-            equivalent = (item.family, item.source, item.time.isoformat().replace("+00:00", "Z"))
-            sorted_logs[match_index] = Event(
-                match.time,
-                match.source,
-                match.values,
-                match.family,
-                match.equivalents + (equivalent,),
+            positions.append(
+                Event(
+                    time,
+                    row.get("source_file") or "",
+                    (mer_coordinate(raw["lat"]), mer_coordinate(raw["lon"])),
+                    "mer_environment_records",
+                )
             )
-        else:
-            mer_only.append(item)
-    return station, sorted(sorted_logs + mer_only, key=lambda x: x.time), len(mer_only)
+    return station, sorted(positions, key=lambda x: x.time)
 
 
-def operational_events(directory: Path) -> tuple[list[Event], list[Event]]:
-    by_source: dict[str, list[tuple[datetime, str]]] = {}
-    commands = []
-    for row in records(directory, "log_operational_records") or ():
-        time = timestamp(row.get("record_time"))
-        source = row.get("source_file") or ""
-        message = str(row.get("message") or "")
-        if not time:
-            continue
-        by_source.setdefault(source, []).append((time, message))
-        match = COMMAND.fullmatch(message)
-        if match:
-            commands.append(Event(time, source, (int(match.group(1)),)))
-
-    vitals = []
-    for source, rows in by_source.items():
-        rows.sort()
-        times = [time for time, _ in rows]
-        for time, message in rows:
-            match = VBAT.search(message)
-            if not match:
-                continue
-            start = bisect.bisect_left(times, time.timestamp() - 10, key=lambda x: x.timestamp())
-            stop = bisect.bisect_right(times, time.timestamp() + 10, key=lambda x: x.timestamp())
-            nearby = rows[start:stop]
-            pint = next((PINT.search(text) for _, text in nearby if PINT.search(text)), None)
-            pext = next((PEXT.search(text) for _, text in nearby if PEXT.search(text)), None)
-            if pint and pext:
-                vitals.append(Event(time, source, tuple(map(int, match.groups() + pint.groups() + pext.groups()))))
-    return sorted(vitals, key=lambda x: x.time), sorted(commands, key=lambda x: x.time)
-
-
-def upload_events(directory: Path) -> list[Event]:
+def dop_events(directory: Path) -> list[Event]:
     result = []
-    for row in records(directory, "log_transmission_records") or ():
-        value = row.get("uploaded_file_count")
+    for row in records(directory, "log_gps_records") or ():
+        if row.get("gps_record_kind") != "dop":
+            continue
         time = timestamp(row.get("record_time"))
-        if value is not None and time:
-            result.append(Event(time, row.get("source_file") or "", (int(value),)))
+        raw = row.get("raw_values") or {}
+        if time and raw.get("hdop") is not None and raw.get("vdop") is not None:
+            result.append(Event(time, row.get("source_file") or "", (float(raw["hdop"]), float(raw["vdop"])), "log_gps_records"))
     return sorted(result, key=lambda x: x.time)
 
 
-def nearest(anchor: Event, candidates: list[Event], seconds: int) -> Event | None:
-    eligible = [x for x in candidates if abs((x.time - anchor.time).total_seconds()) <= seconds]
-    if not eligible:
-        return None
-    same_source = [x for x in eligible if x.source == anchor.source]
-    return min(same_source or eligible, key=lambda x: abs((x.time - anchor.time).total_seconds()))
+def battery_events(directory: Path) -> list[Event]:
+    result = []
+    for row in records(directory, "log_battery_records") or ():
+        time = timestamp(row.get("record_time"))
+        voltage = row.get("voltage_mv")
+        if voltage is None or not time:
+            continue
+        preference = 0 if row.get("battery_record_kind") == "vbat_summary" else 1
+        result.append(
+            Event(
+                time,
+                row.get("source_file") or "",
+                (int(voltage), as_optional_int(row.get("minimum_voltage_mv"))),
+                "log_battery_records",
+                preference,
+            )
+        )
+    return sorted(result, key=lambda x: x.time)
 
 
-def following(anchor: Event, candidates: list[Event], seconds: int) -> Event | None:
-    eligible = [x for x in candidates if 0 <= (x.time - anchor.time).total_seconds() <= seconds]
-    if not eligible:
-        return None
-    same_source = [x for x in eligible if x.source == anchor.source]
-    return min(same_source or eligible, key=lambda x: x.time)
+def pressure_events(directory: Path) -> tuple[list[Event], list[Event]]:
+    internal = []
+    external = []
+    for row in records(directory, "log_pressure_temperature_records") or ():
+        time = timestamp(row.get("record_time"))
+        if not time:
+            continue
+        source = row.get("source_file") or ""
+        if row.get("internal_pressure_pa") is not None:
+            internal.append(Event(time, source, (int(row["internal_pressure_pa"]),), "log_pressure_temperature_records"))
+        if row.get("external_pressure_mbar") is not None:
+            external.append(
+                Event(
+                    time,
+                    source,
+                    (int(row["external_pressure_mbar"]), as_optional_int(row.get("external_pressure_range_mbar"))),
+                    "log_pressure_temperature_records",
+                )
+            )
+    return sorted(internal, key=lambda x: x.time), sorted(external, key=lambda x: x.time)
+
+
+def iridium_events(directory: Path) -> tuple[list[Event], list[Event]]:
+    commands = []
+    uploads = []
+    for row in records(directory, "log_iridium_records") or ():
+        for event in row.get("iridium_events") or (row,):
+            kind = event.get("iridium_event_kind") or event.get("transmission_kind")
+            time = timestamp(event.get("record_time") or row.get("record_time"))
+            source = event.get("source_file") or row.get("source_file") or ""
+            if not time:
+                continue
+            command_count = first_present(event, "received_command_count", "n_commands_received", "command_count")
+            upload_count = first_present(event, "uploaded_file_count", "n_files_uploaded")
+            if kind == "command_summary" and command_count is not None:
+                commands.append(Event(time, source, (int(command_count),), "log_iridium_records"))
+            elif kind == "upload_session_summary" and upload_count is not None:
+                uploads.append(Event(time, source, (int(upload_count),), "log_iridium_records"))
+    return sorted(commands, key=lambda x: x.time), sorted(uploads, key=lambda x: x.time)
+
+
+def first_present(mapping: dict, *keys: str) -> object | None:
+    for key in keys:
+        if mapping.get(key) is not None:
+            return mapping[key]
+    return None
+
+
+def as_optional_int(value: object | None) -> int | None:
+    return int(value) if value is not None else None
+
+
+def one_to_one_matches(
+    anchors: list[Event],
+    candidates: list[Event],
+    seconds: int,
+    anchor_family: str | None = None,
+) -> list[Event | None]:
+    result: list[Event | None] = [None] * len(anchors)
+    if not anchors or not candidates:
+        return result
+    candidate_times = [candidate.time.timestamp() for candidate in candidates]
+    pairs = []
+    for anchor_index, anchor in enumerate(anchors):
+        if anchor_family and anchor.family != anchor_family:
+            continue
+        start = bisect.bisect_left(candidate_times, anchor.time.timestamp() - seconds)
+        stop = bisect.bisect_right(candidate_times, anchor.time.timestamp() + seconds)
+        for candidate_index in range(start, stop):
+            candidate = candidates[candidate_index]
+            offset = abs((candidate.time - anchor.time).total_seconds())
+            source_penalty = 0 if candidate.source == anchor.source else 1
+            pairs.append((candidate.preference, source_penalty, offset, anchor_index, candidate_index))
+    used_anchors: set[int] = set()
+    used_candidates: set[int] = set()
+    for _, _, _, anchor_index, candidate_index in sorted(pairs):
+        if anchor_index in used_anchors or candidate_index in used_candidates:
+            continue
+        result[anchor_index] = candidates[candidate_index]
+        used_anchors.add(anchor_index)
+        used_candidates.add(candidate_index)
+    return result
 
 
 def format_time(value: datetime) -> str:
     return f"{value.day:02d}-{MONTHS[value.month - 1]}-{value.year:04d} {value:%H:%M:%S}"
 
 
-def format_row(station: str, gps: Event, vital: Event | None, command: Event | None, upload: Event | None) -> str:
-    battery, minimum, internal, external, pressure_range = vital.values if vital else (-1, -1, -1, -1, -1)
-    commands = command.values[0] if command else -1
-    uploaded = upload.values[0] if upload else -1
-    lat, lon, hdop, vdop = gps.values
+def fmt_float(value: float | None, width: int, precision: int) -> str:
+    return f"{'NaN':>{width}s}" if value is None else f"{value:{width}.{precision}f}"
+
+
+def fmt_int(value: int | None, width: int) -> str:
+    return f"{'NaN':>{width}s}" if value is None else f"{value:{width}d}"
+
+
+def format_row(station: str, gps: Event, dop: Event | None, battery: Event | None, internal: Event | None, external: Event | None, command: Event | None, upload: Event | None) -> str:
+    lat, lon = gps.values
+    hdop, vdop = dop.values if dop else (None, None)
+    battery_mv, minimum = battery.values if battery else (None, None)
+    internal_pressure = internal.values[0] if internal else None
+    external_pressure, pressure_range = external.values if external else (None, None)
+    commands = command.values[0] if command else None
+    uploaded = upload.values[0] if upload else None
     return (
         f"{station:<5s}   {format_time(gps.time)}  {lat:11.6f} {lon:12.6f} "
-        f"{hdop:7.3f}{vdop:7.3f}   {battery:6d} {minimum:6d}   {internal:6d}"
-        f"{external:6d}{pressure_range:5d}   {commands:3d} {-1:3d} {uploaded:3d}"
+        f"{fmt_float(hdop, 7, 3)}{fmt_float(vdop, 7, 3)}   {fmt_int(battery_mv, 6)} {fmt_int(minimum, 6)}   {fmt_int(internal_pressure, 6)}"
+        f"{fmt_int(external_pressure, 6)}{fmt_int(pressure_range, 5)}   {fmt_int(commands, 3)} {'NaN':>3s} {fmt_int(uploaded, 3)}"
     )
 
 
-def audit_row(station: str, index: int, gps: Event, vital: Event | None, command: Event | None, upload: Event | None) -> dict:
+def audit_row(station: str, index: int, gps: Event, dop: Event | None, battery: Event | None, internal: Event | None, external: Event | None, command: Event | None, upload: Event | None) -> dict:
     def joined(event: Event | None, columns: list[str], family: str) -> dict:
+        values = dict(zip(columns, event.values)) if event else {column: None for column in columns}
+        statuses = {column: "matched" if value is not None else "missing" for column, value in values.items()}
         if event is None:
-            return {"status": "missing", "family": family, "values": {column: None for column in columns}}
+            return {"status": "missing", "field_status": statuses, "family": family, "values": values}
         return {
             "status": "matched",
+            "field_status": statuses,
             "family": family,
-            "values": dict(zip(columns, event.values)),
+            "values": values,
             "source_file": event.source,
             "record_time": event.time.isoformat().replace("+00:00", "Z"),
             "offset_seconds": int((event.time - gps.time).total_seconds()),
         }
 
-    hdop_status = "observed" if gps.values[2] >= 0 else "missing"
     return {
         "row_number": index,
         "anchor": {
@@ -224,29 +260,14 @@ def audit_row(station: str, index: int, gps: Event, vital: Event | None, command
             "source_file": gps.source,
             "record_time": gps.time.isoformat().replace("+00:00", "Z"),
             "values": {"station": station, "datetime": format_time(gps.time), "lat": gps.values[0], "lon": gps.values[1]},
-            "equivalent_normalized_records": [
-                {"family": family, "source_file": source, "record_time": time}
-                for family, source, time in gps.equivalents
-            ],
         },
-        "dop": {
-            "status": hdop_status,
-            "family": "log_gps_records",
-            "values": {
-                "hdop": gps.values[2] if hdop_status == "observed" else None,
-                "vdop": gps.values[3] if hdop_status == "observed" else None,
-            },
-            "source_file": gps.source if hdop_status == "observed" else None,
-            "record_time": gps.time.isoformat().replace("+00:00", "Z") if hdop_status == "observed" else None,
-        },
-        "vital": joined(
-            vital,
-            ["battery_mv", "min_voltage_mv", "internal_pressure_pa", "external_pressure_mbar", "pressure_range_mbar"],
-            "log_operational_records",
-        ),
-        "commands": joined(command, ["n_commands_received"], "log_operational_records"),
+        "dop": joined(dop, ["hdop", "vdop"], "log_gps_records"),
+        "battery": joined(battery, ["battery_mv", "min_voltage_mv"], "log_battery_records"),
+        "internal_pressure": joined(internal, ["internal_pressure_pa"], "log_pressure_temperature_records"),
+        "external_pressure": joined(external, ["external_pressure_mbar", "pressure_range_mbar"], "log_pressure_temperature_records"),
+        "commands": joined(command, ["n_commands_received"], "log_iridium_records"),
         "queued": {"status": "missing", "family": None, "values": {"n_files_queued": None}, "reason": "not normalized"},
-        "uploaded": joined(upload, ["n_files_uploaded"], "log_transmission_records"),
+        "uploaded": joined(upload, ["n_files_uploaded"], "log_iridium_records"),
     }
 
 
@@ -261,6 +282,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=Path("tables"))
     parser.add_argument("--audit-output", type=Path, help="audit directory (default: OUTPUT/audit)")
     parser.add_argument("--instruments", nargs="*", help="station IDs or normalized instrument directory names")
+    parser.add_argument("--dop-seconds", type=int, default=300)
     parser.add_argument("--vital-seconds", type=int, default=3600)
     parser.add_argument("--status-seconds", type=int, default=1800)
     return parser.parse_args()
@@ -276,27 +298,41 @@ def main() -> None:
     audit_output = args.audit_output or args.output / "audit"
     audit_output.mkdir(parents=True, exist_ok=True)
     for directory in directories:
-        station, positions, mer_only = gps_events(directory)
+        station, positions = gps_events(directory)
         station = station or station_from_directory(directory)
         if not positions:
             continue
-        vitals, commands = operational_events(directory)
-        uploads = upload_events(directory)
+        dops = one_to_one_matches(positions, dop_events(directory), args.dop_seconds, anchor_family="log_gps_records")
+        batteries = one_to_one_matches(positions, battery_events(directory), args.vital_seconds)
+        internal_pressures, external_pressures = pressure_events(directory)
+        internal_matches = one_to_one_matches(positions, internal_pressures, args.vital_seconds)
+        external_matches = one_to_one_matches(positions, external_pressures, args.vital_seconds)
+        commands, uploads = iridium_events(directory)
+        command_matches = one_to_one_matches(positions, commands, args.status_seconds)
+        upload_matches = one_to_one_matches(positions, uploads, args.status_seconds)
         rows = []
         audit = []
-        complete = 0
         for index, gps in enumerate(positions, 1):
-            vital = nearest(gps, vitals, args.vital_seconds)
-            command = nearest(gps, commands, args.status_seconds)
-            upload = following(gps, uploads, args.status_seconds)
-            complete += vital is not None
-            rows.append(format_row(station, gps, vital, command, upload))
-            audit.append(audit_row(station, index, gps, vital, command, upload))
+            matched = (
+                dops[index - 1],
+                batteries[index - 1],
+                internal_matches[index - 1],
+                external_matches[index - 1],
+                command_matches[index - 1],
+                upload_matches[index - 1],
+            )
+            rows.append(format_row(station, gps, *matched))
+            audit.append(audit_row(station, index, gps, *matched))
         (args.output / f"{station}_all.txt").write_text("\n".join(rows) + "\n", encoding="ascii")
         with (audit_output / f"{station}_all.jsonl").open("w", encoding="utf-8") as handle:
             for item in audit:
                 handle.write(json.dumps(item, separators=(",", ":")) + "\n")
-        print(f"{station}: rows={len(rows)} log_gps={len(rows) - mer_only} mer_only={mer_only} complete_vitals={complete}")
+        print(
+            f"{station}: rows={len(rows)} dop={sum(x is not None for x in dops)} "
+            f"battery={sum(x is not None for x in batteries)} internal={sum(x is not None for x in internal_matches)} "
+            f"external={sum(x is not None for x in external_matches)} commands={sum(x is not None for x in command_matches)} "
+            f"uploads={sum(x is not None for x in upload_matches)}"
+        )
 
 
 if __name__ == "__main__":

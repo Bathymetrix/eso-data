@@ -45,11 +45,10 @@ The primary text files contain only public table rows. Their JSONL sidecars
 record the source family, source file, source timestamp, join offset, emitted
 values, match status, and provenance for every emitted value.
 
-Missing integers are written as -1; missing floating-point DOP values are
-written as -1.000.
+Missing values are written as `NaN`, regardless of type or display precision.
 
-n_files_queued is currently unavailable from normalized records and is
-therefore always emitted as missing.
+`n_files_queued` is currently unavailable from normalized records and is
+therefore always emitted as `NaN`.
 
 To generate selected instruments:
 
@@ -61,6 +60,7 @@ Useful options:
 
 --root PATH             normalized records root
 --audit-output PATH     separate audit-sidecar directory
+--dop-seconds N         maximum DOP join offset (default: 300)
 --vital-seconds N       maximum battery/pressure join offset (default: 3600)
 --status-seconds N      maximum Iridium command/upload join offset (default: 1800)
 

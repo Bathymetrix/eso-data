@@ -11,10 +11,10 @@ from __future__ import annotations
 import argparse
 import bisect
 import json
-import re
 import statistics
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator
 
@@ -34,17 +34,9 @@ FAMILIES = (
     "log_gps_records",
     "log_battery_records",
     "log_pressure_temperature_records",
-    "log_transmission_records",
-    "log_operational_records",
-    "log_unclassified_records",
+    "log_iridium_records",
     "mer_environment_records",
 )
-
-VBAT_RE = re.compile(r"\bVbat\s+(-?\d+)mV\s+\(min\s+(-?\d+)mV\)", re.I)
-PINT_RE = re.compile(r"\b(?:Pint|internal pressure)\s+(-?\d+)Pa\b", re.I)
-PEXT_RE = re.compile(r"\bPext\s*([+-]?\d+)mbar\s+\(rng\s+(-?\d+)mbar\)", re.I)
-COMMAND_RE = re.compile(r"\b(\d+)\s+cmd\(s\) received\b", re.I)
-QUEUED_RE = re.compile(r"\b(\d+)\s+file\(s\) queued\b", re.I)
 
 
 @dataclass(frozen=True)
@@ -90,7 +82,13 @@ def count_lines_and_sample_fields(path: Path | None, sample_limit: int) -> tuple
 def epoch(record: dict) -> int | None:
     value = record.get("log_epoch_time")
     if value is None:
-        return None
+        time_text = record.get("record_time") or record.get("gpsinfo_date")
+        if not time_text:
+            return None
+        try:
+            return int(datetime.fromisoformat(time_text.replace("Z", "+00:00")).astimezone(timezone.utc).timestamp())
+        except ValueError:
+            return None
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -124,45 +122,72 @@ def parse_gps(path: Path | None) -> tuple[list[Event], list[Event], Counter]:
     return sorted(fixes, key=lambda item: item.epoch), sorted(dops, key=lambda item: item.epoch), kinds
 
 
-def parse_operational(path: Path | None) -> dict[str, list[Event]]:
-    result: dict[str, list[Event]] = {
-        "vbat": [],
-        "pint": [],
-        "pext": [],
-        "commands": [],
-        "queued": [],
-    }
+def parse_mer_gps(path: Path | None) -> list[Event]:
+    fixes: list[Event] = []
     for record in iter_jsonl(path):
-        message = str(record.get("message") or "")
-        for name, regex in (
-            ("vbat", VBAT_RE),
-            ("pint", PINT_RE),
-            ("pext", PEXT_RE),
-            ("commands", COMMAND_RE),
-            ("queued", QUEUED_RE),
-        ):
-            match = regex.search(message)
-            if not match:
-                continue
-            values = tuple(int(value) for value in match.groups())
-            item = event(record, values[0] if len(values) == 1 else values)
+        if record.get("environment_kind") != "gpsinfo":
+            continue
+        raw_values = record.get("raw_values") or {}
+        item = event(record, (raw_values.get("lat"), raw_values.get("lon")))
+        if item:
+            fixes.append(item)
+    return sorted(fixes, key=lambda item: item.epoch)
+
+
+def parse_battery(path: Path | None) -> list[Event]:
+    result: list[Event] = []
+    for record in iter_jsonl(path):
+        if record.get("voltage_mv") is None:
+            continue
+        item = event(record, (record.get("voltage_mv"), record.get("minimum_voltage_mv")))
+        if item:
+            result.append(item)
+    return sorted(result, key=lambda item: item.epoch)
+
+
+def parse_pressure(path: Path | None) -> dict[str, list[Event]]:
+    result: dict[str, list[Event]] = {"internal": [], "external": []}
+    for record in iter_jsonl(path):
+        if record.get("internal_pressure_pa") is not None:
+            item = event(record, record.get("internal_pressure_pa"))
             if item:
-                result[name].append(item)
+                result["internal"].append(item)
+        if record.get("external_pressure_mbar") is not None:
+            item = event(record, (record.get("external_pressure_mbar"), record.get("external_pressure_range_mbar")))
+            if item:
+                result["external"].append(item)
     for values in result.values():
         values.sort(key=lambda item: item.epoch)
     return result
 
 
-def parse_upload_summaries(path: Path | None) -> list[Event]:
-    summaries: list[Event] = []
+def first_present(mapping: dict, *keys: str) -> object | None:
+    for key in keys:
+        if mapping.get(key) is not None:
+            return mapping[key]
+    return None
+
+
+def parse_iridium(path: Path | None) -> dict[str, list[Event]]:
+    result: dict[str, list[Event]] = {"commands": [], "uploads": []}
     for record in iter_jsonl(path):
-        value = record.get("uploaded_file_count")
-        if value is None:
-            continue
-        item = event(record, int(value))
-        if item:
-            summaries.append(item)
-    return sorted(summaries, key=lambda item: item.epoch)
+        for nested in record.get("iridium_events") or (record,):
+            kind = nested.get("iridium_event_kind") or nested.get("transmission_kind")
+            source = dict(record)
+            source.update(nested)
+            command_count = first_present(source, "received_command_count", "n_commands_received", "command_count")
+            upload_count = first_present(source, "uploaded_file_count", "n_files_uploaded")
+            if kind == "command_summary" and command_count is not None:
+                item = event(source, int(command_count))
+                if item:
+                    result["commands"].append(item)
+            elif kind == "upload_session_summary" and upload_count is not None:
+                item = event(source, int(upload_count))
+                if item:
+                    result["uploads"].append(item)
+    for values in result.values():
+        values.sort(key=lambda item: item.epoch)
+    return result
 
 
 def previous_event(events: list[Event], anchor: Event) -> Event | None:
@@ -218,6 +243,32 @@ def previous_diagnostics(fixes: list[Event], candidates: list[Event], freshness_
     )
 
 
+def nearest_diagnostics(fixes: list[Event], candidates: list[Event], max_seconds: int) -> str:
+    offsets: list[int] = []
+    same_source = 0
+    candidate_epochs = [item.epoch for item in candidates]
+    pairs = []
+    for anchor_index, anchor in enumerate(fixes):
+        start = bisect.bisect_left(candidate_epochs, anchor.epoch - max_seconds)
+        stop = bisect.bisect_right(candidate_epochs, anchor.epoch + max_seconds)
+        for candidate_index in range(start, stop):
+            candidate = candidates[candidate_index]
+            source_penalty = 0 if candidate.source_file == anchor.source_file else 1
+            pairs.append((source_penalty, abs(candidate.epoch - anchor.epoch), anchor_index, candidate_index))
+    used_anchors: set[int] = set()
+    used_candidates: set[int] = set()
+    for _, _, anchor_index, candidate_index in sorted(pairs):
+        if anchor_index in used_anchors or candidate_index in used_candidates:
+            continue
+        anchor = fixes[anchor_index]
+        match = candidates[candidate_index]
+        offsets.append(match.epoch - anchor.epoch)
+        same_source += match.source_file == anchor.source_file
+        used_anchors.add(anchor_index)
+        used_candidates.add(candidate_index)
+    return f"{fmt_offset_summary(offsets)} missing={len(fixes) - len(offsets)}/{len(fixes)} same_source={same_source}/{len(offsets)}"
+
+
 def session_diagnostics(fixes: list[Event], candidates: list[Event], max_seconds: int) -> str:
     offsets: list[int] = []
     for index, anchor in enumerate(fixes):
@@ -236,6 +287,7 @@ def exact_dop_diagnostics(fixes: list[Event], dops: list[Event]) -> str:
 def inspect_instrument(
     instrument_dir: Path,
     sample_limit: int,
+    dop_seconds: int,
     session_seconds: int,
     freshness_seconds: int,
     show_fields: bool,
@@ -252,24 +304,21 @@ def inspect_instrument(
         print(f"  {family:34s} {counts[family]:9d}")
 
     fixes, dops, gps_kinds = parse_gps(paths["log_gps_records"])
-    operational = parse_operational(paths["log_operational_records"])
-    uploads = parse_upload_summaries(paths["log_transmission_records"])
+    mer_fixes = parse_mer_gps(paths["mer_environment_records"])
+    all_fixes = sorted(fixes + mer_fixes, key=lambda item: item.epoch)
+    batteries = parse_battery(paths["log_battery_records"])
+    pressures = parse_pressure(paths["log_pressure_temperature_records"])
+    iridium = parse_iridium(paths["log_iridium_records"])
 
     print(f"gps kinds: {dict(sorted(gps_kinds.items(), key=lambda item: str(item[0])))}")
-    print(f"position anchors: {len(fixes)}")
-    print(f"dop:       {exact_dop_diagnostics(fixes, dops)}")
-    print(f"vbat<=gps: {previous_diagnostics(fixes, operational['vbat'], freshness_seconds)}")
-    print(f"pint<=gps: {previous_diagnostics(fixes, operational['pint'], freshness_seconds)}")
-    print(f"pext<=gps: {previous_diagnostics(fixes, operational['pext'], freshness_seconds)}")
-    print(
-        f"cmd>gps:   {session_diagnostics(fixes, operational['commands'], session_seconds)} "
-        f"(same source, before next fix, <= {session_seconds}s)"
-    )
-    print(
-        f"up>gps:    {session_diagnostics(fixes, uploads, session_seconds)} "
-        f"(same source, before next fix, <= {session_seconds}s)"
-    )
-    print(f"queued count messages parsed: {len(operational['queued'])}")
+    print(f"position anchors: log={len(fixes)} mer={len(mer_fixes)} total={len(all_fixes)}")
+    print(f"dop:       {nearest_diagnostics(fixes, dops, dop_seconds)}")
+    print(f"battery:   {nearest_diagnostics(all_fixes, batteries, freshness_seconds)}")
+    print(f"pint:      {nearest_diagnostics(all_fixes, pressures['internal'], freshness_seconds)}")
+    print(f"pext:      {nearest_diagnostics(all_fixes, pressures['external'], freshness_seconds)}")
+    print(f"commands:  {nearest_diagnostics(all_fixes, iridium['commands'], session_seconds)}")
+    print(f"uploads:   {nearest_diagnostics(all_fixes, iridium['uploads'], session_seconds)}")
+    print("queued count messages parsed: 0")
 
     if show_fields:
         print("sampled top-level fields:")
@@ -306,6 +355,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--all", action="store_true", help="inspect every instrument directory")
     parser.add_argument(
+        "--dop-seconds",
+        type=int,
+        default=300,
+        help="maximum DOP join offset reported in diagnostics (default: 300)",
+    )
+    parser.add_argument(
         "--session-seconds",
         type=int,
         default=1800,
@@ -339,6 +394,7 @@ def main() -> None:
         inspect_instrument(
             directory,
             sample_limit=args.schema_sample_limit,
+            dop_seconds=args.dop_seconds,
             session_seconds=args.session_seconds,
             freshness_seconds=args.freshness_seconds,
             show_fields=args.show_fields,

@@ -20,7 +20,7 @@ def read_rows(path: Path) -> list[tuple]:
         if len(fields) != 15:
             continue
         time = datetime.strptime(f"{fields[1]} {fields[2]}", "%d-%b-%Y %H:%M:%S").replace(tzinfo=timezone.utc)
-        rows.append((time, float(fields[3]), float(fields[4]), tuple(map(int, fields[7:12]))))
+        rows.append((time, float(fields[3]), float(fields[4]), tuple(fields[7:12])))
     return sorted(rows)
 
 
@@ -58,7 +58,7 @@ def main() -> None:
     lines = [
         "# eso_locations comparison",
         "",
-        f"Generated: `{args.generated.resolve()}`  ",
+        f"Generated: `{args.generated.resolve()}`",
         f"Untrusted derived comparison set: `{args.legacy.expanduser().resolve()}`",
         "",
         "The normalized-record product is authoritative; this is a difference log, not a pass/fail test.",
