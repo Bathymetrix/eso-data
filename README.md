@@ -125,7 +125,12 @@ tables.
 
 The report summarizes row counts, nearest timestamp and position differences,
 vital-field agreement, and legacy rows with no normalized GPS observation
-within the comparison window.
+within the comparison window. It also writes one tab-delimited
+`<instrument_id>_uncovered_time.txt` file per float beside the report. Each
+uncovered legacy timestamp is paired with the immediately preceding and
+following normalized LOG and MER source filenames. Use `--records` to select
+the normalized records root and `--uncovered-output` to place these files in a
+different directory.
 
 ## Design
 

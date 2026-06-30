@@ -142,7 +142,10 @@ row and records:
 
 scripts/compare_esoloc.py writes a Markdown report so successive runs
 can be retained as an empirical log of how the normalized-record product
-differs from the historical derived output.
+differs from the historical derived output. It also writes a per-float
+uncovered-time file that brackets each uncovered legacy timestamp with the
+preceding and following LOG and MER source filenames from normalized records,
+providing a bounded raw-file interval for manual review.
 
 ## Pseudocode
 
