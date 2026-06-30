@@ -41,19 +41,7 @@ def timestamp(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def has_usable_log_epoch(row: dict) -> bool:
-    value = row.get("log_epoch_time")
-    if value is None:
-        return True
-    try:
-        return int(value) >= 0
-    except (TypeError, ValueError):
-        return False
-
-
 def record_timestamp(row: dict, field: str = "record_time") -> datetime | None:
-    if not has_usable_log_epoch(row):
-        return None
     try:
         return timestamp(row.get(field))
     except ValueError:
@@ -174,10 +162,8 @@ def iridium_events(directory: Path) -> tuple[list[Event], list[Event]]:
             kind = event.get("iridium_event_kind") or event.get("transmission_kind")
             source_event = dict(row)
             source_event.update(event)
-            if not has_usable_log_epoch(source_event):
-                continue
             try:
-                time = timestamp(event.get("record_time") or row.get("record_time"))
+                time = timestamp(source_event.get("record_time"))
             except ValueError:
                 time = None
             source = event.get("source_file") or row.get("source_file") or ""

@@ -70,21 +70,12 @@ def test_negative_log_epoch_components_do_not_suppress_corrected_gps_anchor(tmp_
                         "log_epoch_time": -1993752671,
                         "record_time": "1906-10-13T23:08:49.000000Z",
                         "received_command_count": 1,
-                    }
-                ],
-            },
-            {
-                "instrument_id": "P0025",
-                "source_file": "25_8929BED9.LOG",
-                "log_epoch_time": 1681900347,
-                "record_time": "2023-04-19T10:32:27.000000Z",
-                "iridium_events": [
+                    },
                     {
                         "iridium_event_kind": "upload_session_summary",
-                        "log_epoch_time": 1681900347,
                         "record_time": "2023-04-19T10:32:27.000000Z",
                         "uploaded_file_count": 1,
-                    }
+                    },
                 ],
             },
         ],
@@ -100,7 +91,7 @@ def test_negative_log_epoch_components_do_not_suppress_corrected_gps_anchor(tmp_
     assert positions[0].values == (-23.4995, -132.5074)
     assert len(dops) == 1
     assert dops[0].values == (0.920, 1.590)
-    assert commands == []
+    assert len(commands) == 1
     assert len(uploads) == 1
 
     command_matches = tables.one_to_one_matches(positions, commands, 1800)
