@@ -291,12 +291,14 @@ def station_from_directory(directory: Path) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "-i",
         "--root",
         type=Path,
         default=Path("~/mermaid/records"),
         help="normalized records root (default: %(default)s)",
     )
     parser.add_argument(
+        "-o",
         "--output",
         type=Path,
         default=Path("tables"),

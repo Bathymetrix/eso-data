@@ -17,10 +17,10 @@ parses raw MERMAID files directly.
 ## Generate Tables
 
 ```sh
-./scripts/build_esoloc.py --output tables
+./scripts/build_esoloc.py -o tables
 ```
 
-Pass `--root` to select the normalized JSONL root to publish from. The builder
+Pass `-i`/`--root` to select the normalized JSONL root to publish from. The builder
 currently consumes these normalized record families:
 
 - `log_gps_records`
@@ -83,7 +83,7 @@ To generate selected instruments:
 
 ```sh
 ./scripts/build_esoloc.py \
-  --output tables \
+  -o tables \
   --instruments P0023 P0050
 ```
 
@@ -91,7 +91,8 @@ Useful options:
 
 | Option                   | Description                                               |
 | ------------------------ | --------------------------------------------------------- |
-| `--root PATH`            | Normalized records root                                   |
+| `-i, --root PATH`        | Normalized records root                                   |
+| `-o, --output PATH`      | Generated table directory                                 |
 | `--audit-output PATH`    | Separate audit-sidecar directory                          |
 | `--dop-seconds N`        | Maximum DOP join offset (default: 300)                    |
 | `--vital-seconds N`      | Maximum battery/pressure join offset (default: 300)       |
@@ -119,17 +120,17 @@ used only as a diagnostic comparison and is never used to populate output
 tables.
 
 ```sh
-./scripts/compare_esoloc.py tables \
-  --output reports/eso_locations_comparison.md
+./scripts/compare_esoloc.py -i tables \
+  -o reports/eso_locations_comparison.txt
 ```
 
-The report summarizes row counts, nearest timestamp and position differences,
-vital-field agreement, and legacy rows with no normalized GPS observation
-within the comparison window. It also writes one tab-delimited
-`<instrument_id>_uncovered_time.txt` file per float beside the report. Each
-uncovered legacy timestamp is paired with the immediately preceding and
+The report summarizes row counts and timestamp/position differences for
+matched rows, plus legacy rows with no normalized GPS observation within the
+matching window. It also writes one tab-delimited
+`<instrument_id>_unmatched_time.txt` file per float beside the report. Each
+unmatched legacy timestamp is paired with the immediately preceding and
 following normalized LOG and MER source filenames. Use `--records` to select
-the normalized records root and `--uncovered-output` to place these files in a
+the normalized records root and `--unmatched-output` to place these files in a
 different directory.
 
 ## Design

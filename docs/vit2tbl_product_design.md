@@ -130,20 +130,19 @@ GPS rows processed and successfully matched observations.
 provenance. It is compared only after generation and never supplies a product
 value or row-selection rule.
 
-The comparison walks from each legacy row to the nearest normalized-derived GPS
+The comparison finds the nearest normalized-derived GPS row for each legacy
 row and records:
 
 * row-count difference
-* nearest normalized-derived timestamp offset
-* nearest normalized-derived position distance
-* exact agreement of matched status values
-* count and timestamps of legacy rows with no normalized GPS observation within
-    the configured comparison window (300 seconds by default)
+* timestamp offsets for rows matched within the configured window
+* position distances for rows matched within the configured window
+* count and timestamps of unmatched legacy rows with no normalized GPS
+    observation within the configured matching window (300 seconds by default)
 
-scripts/compare_esoloc.py writes a Markdown report so successive runs
+scripts/compare_esoloc.py writes a plain-text report so successive runs
 can be retained as an empirical log of how the normalized-record product
 differs from the historical derived output. It also writes a per-float
-uncovered-time file that brackets each uncovered legacy timestamp with the
+unmatched-time file that brackets each unmatched legacy timestamp with the
 preceding and following LOG and MER source filenames from normalized records,
 providing a bounded raw-file interval for manual review.
 
