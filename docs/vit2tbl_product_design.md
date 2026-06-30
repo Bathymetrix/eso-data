@@ -121,7 +121,7 @@ values, joined source files and timestamps, join offsets, and per-field match
 status. Every public value can therefore be traced back to exactly one
 normalized observation.
 
-scripts/build_location_tables.py may also report summary statistics such as
+scripts/build_esoloc.py may also report summary statistics such as
 GPS rows processed and successfully matched observations.
 
 ## Legacy Comparison
@@ -140,7 +140,7 @@ row and records:
 * count and timestamps of legacy rows with no normalized GPS observation within
     one hour
 
-scripts/compare_eso_locations.py writes a Markdown report so successive runs
+scripts/compare_esoloc.py writes a Markdown report so successive runs
 can be retained as an empirical log of how the normalized-record product
 differs from the historical derived output.
 

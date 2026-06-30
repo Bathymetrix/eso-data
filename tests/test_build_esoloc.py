@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-import build_location_tables as tables
+import build_esoloc as tables
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
