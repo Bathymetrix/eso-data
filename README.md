@@ -127,16 +127,6 @@ The report summarizes row counts, nearest timestamp and position differences,
 vital-field agreement, and legacy rows with no normalized GPS observation
 within the comparison window.
 
-## Inspect Inputs
-
-```sh
-./scripts/inspect_vit2tbl_inputs.py
-```
-
-This read-only discovery tool summarizes normalized record families, sampled
-fields, and timestamp alignment diagnostics. Use `--all` to inspect every
-instrument.
-
 ## Design
 
 See [`docs/vit2tbl_product_design.md`](docs/vit2tbl_product_design.md) for the

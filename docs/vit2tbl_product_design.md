@@ -138,7 +138,7 @@ row and records:
 * nearest normalized-derived position distance
 * exact agreement of matched status values
 * count and timestamps of legacy rows with no normalized GPS observation within
-    one hour
+    the configured comparison window (300 seconds by default)
 
 scripts/compare_esoloc.py writes a Markdown report so successive runs
 can be retained as an empirical log of how the normalized-record product
@@ -178,6 +178,5 @@ for each instrument:
 ## Minimal Implementation
 
 Keep the publisher as a single standard-library script: read normalized JSONL,
-perform bounded one-to-one joins, and format rows. Keep discovery and legacy
-comparison as separate read-only scripts so validation does not become
-production policy.
+perform bounded one-to-one joins, and format rows. Keep legacy comparison as a
+separate read-only script so validation does not become production policy.
