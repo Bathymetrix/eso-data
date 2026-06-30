@@ -67,8 +67,8 @@ Useful options:
 --root PATH             normalized records root
 --audit-output PATH     separate audit-sidecar directory
 --dop-seconds N         maximum DOP join offset (default: 300)
---vital-seconds N       maximum battery/pressure join offset (default: 3600)
---status-seconds N      maximum Iridium command/upload join offset (default: 1800)
+--vital-seconds N       maximum battery/pressure join offset (default: 300)
+--status-seconds N      maximum Iridium command/upload join offset (default: 300)
 
 Install Development Dependencies
 

@@ -344,39 +344,39 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--root",
         type=Path,
-        default=Path("~/mermaid/records").expanduser(),
-        help="normalized records root (default: ~/mermaid/records)",
+        default=Path("~/mermaid/records"),
+        help="normalized records root (default: %(default)s)",
     )
     parser.add_argument(
         "--instruments",
         nargs="+",
         default=list(DEFAULT_INSTRUMENTS),
-        help="instrument directory names to inspect",
+        help="instrument directory names to inspect (default: built-in representative set)",
     )
     parser.add_argument("--all", action="store_true", help="inspect every instrument directory")
     parser.add_argument(
         "--dop-seconds",
         type=int,
         default=300,
-        help="maximum DOP join offset reported in diagnostics (default: 300)",
+        help="maximum DOP join offset reported in diagnostics (default: %(default)s)",
     )
     parser.add_argument(
         "--session-seconds",
         type=int,
-        default=1800,
-        help="maximum forward window for command/upload session matching (default: 1800)",
+        default=300,
+        help="maximum forward window for command/upload session matching (default: %(default)s)",
     )
     parser.add_argument(
         "--freshness-seconds",
         type=int,
-        default=21600,
-        help="freshness threshold reported for previous-value joins (default: 21600 / 6 hours)",
+        default=300,
+        help="freshness threshold reported for previous-value joins (default: %(default)s)",
     )
     parser.add_argument(
         "--schema-sample-limit",
         type=int,
         default=100,
-        help="records per family used to collect top-level field names (default: 100)",
+        help="records per family used to collect top-level field names (default: %(default)s)",
     )
     parser.add_argument("--show-fields", action="store_true", help="print sampled top-level fields")
     return parser.parse_args()

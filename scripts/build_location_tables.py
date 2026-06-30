@@ -290,13 +290,38 @@ def station_from_directory(directory: Path) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("~/mermaid/records").expanduser())
-    parser.add_argument("--output", type=Path, default=Path("tables"))
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path("~/mermaid/records"),
+        help="normalized records root (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("tables"),
+        help="directory for generated fixed-width tables (default: %(default)s)",
+    )
     parser.add_argument("--audit-output", type=Path, help="audit directory (default: OUTPUT/audit)")
     parser.add_argument("--instruments", nargs="*", help="station IDs or normalized instrument directory names")
-    parser.add_argument("--dop-seconds", type=int, default=300)
-    parser.add_argument("--vital-seconds", type=int, default=3600)
-    parser.add_argument("--status-seconds", type=int, default=1800)
+    parser.add_argument(
+        "--dop-seconds",
+        type=int,
+        default=300,
+        help="maximum DOP-to-position join offset (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--vital-seconds",
+        type=int,
+        default=300,
+        help="maximum battery/pressure-to-position join offset (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--status-seconds",
+        type=int,
+        default=300,
+        help="maximum command/upload-to-position join offset (default: %(default)s)",
+    )
     return parser.parse_args()
 
 

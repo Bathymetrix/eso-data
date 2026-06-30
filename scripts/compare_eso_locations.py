@@ -45,10 +45,24 @@ def median(values: list[float]) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("generated", type=Path)
-    parser.add_argument("--legacy", type=Path, default=Path("~/mermaid/esoloc").expanduser())
-    parser.add_argument("--output", type=Path)
-    parser.add_argument("--coverage-seconds", type=int, default=3600)
+    parser.add_argument("generated", type=Path, help="directory containing generated *_all.txt tables")
+    parser.add_argument(
+        "--legacy",
+        type=Path,
+        default=Path("~/mermaid/esoloc"),
+        help="directory containing legacy *_all.txt tables (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="write the Markdown comparison log to this file (default: stdout only)",
+    )
+    parser.add_argument(
+        "--coverage-seconds",
+        type=int,
+        default=300,
+        help="maximum offset for a legacy row to count as covered (default: %(default)s)",
+    )
     parser.add_argument("--instruments", nargs="*", help="limit comparison to station IDs")
     return parser.parse_args()
 
