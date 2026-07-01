@@ -50,7 +50,7 @@ Output column	Normalized source and rule
 station	GPS record instrument_id
 datetime	GPS observation time in UTC, formatted %d-%b-%Y %H:%M:%S
 lat, lon	LOG fix_position plus MER GPSINFO observations
-hdop, vdop	nearest unused LOG dop observation within the configured DOP window, preferring the same source file
+hdop, vdop	nearest unused LOG dop observation at or after the LOG GPS anchor and within the configured forward DOP window, preferring the same source file
 battery_mv, min_voltage_mv	nearest unused battery observation, preferring battery_record_kind == "vbat_summary"
 internal_pressure_pa	nearest unused explicit internal-pressure observation
 external_pressure_mbar, pressure_range_mbar	nearest unused explicit Pext observation
@@ -73,8 +73,9 @@ is sparse.
 
 ## Matching Policy
 
-1. Pair LOG positions and DOP observations using the nearest matching DOP from
-    (most-commonly) the same source file.
+1. Pair LOG positions with the nearest unused DOP observation at or after the
+    anchor and within the configured forward DOP window, preferring the same
+    source file. Never assign an earlier DOP observation to a later anchor.
 2. Match battery observations from log_battery_records within the configured
     vital window.
 3. Match pressure observations from
@@ -157,7 +158,7 @@ for each instrument:
     read Iridium command summaries
     read Iridium upload summaries
     for each GPS anchor in chronological order:
-        attach nearest unused DOP
+        attach nearest unused DOP at or after this LOG GPS anchor
         attach nearest unused battery observation
         attach nearest unused pressure observation
         attach nearest unused command summary

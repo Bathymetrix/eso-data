@@ -65,6 +65,10 @@ are converted from the source GPS strings. DOP observations, battery
 telemetry, pressure telemetry, and Iridium command/upload summaries are joined
 to GPS rows using bounded nearest-neighbor matching.
 
+DOP matching is directional: a DOP observation must occur at or after its LOG
+GPS anchor and no more than the configured DOP window later. All other
+telemetry joins use symmetric windows before or after the anchor.
+
 Status observations are consumed at most once. A battery, pressure, DOP,
 command summary, or upload summary may be matched to only one GPS row. If
 multiple GPS fixes are nearby, the observation is assigned to the nearest GPS
@@ -94,7 +98,7 @@ Useful options:
 | `-i, --root PATH`        | Normalized records root                                   |
 | `-o, --output PATH`      | Generated table directory                                 |
 | `--audit-output PATH`    | Separate audit-sidecar directory                          |
-| `--dop-seconds N`        | Maximum DOP join offset (default: 300)                    |
+| `--dop-seconds N`        | Maximum forward DOP join offset (default: 300)            |
 | `--vital-seconds N`      | Maximum battery/pressure join offset (default: 300)       |
 | `--status-seconds N`     | Maximum Iridium command/upload join offset (default: 300) |
 

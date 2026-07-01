@@ -194,6 +194,7 @@ def one_to_one_matches(
     candidates: list[Event],
     seconds: int,
     anchor_family: str | None = None,
+    candidate_not_before_anchor: bool = False,
 ) -> list[Event | None]:
     result: list[Event | None] = [None] * len(anchors)
     if not anchors or not candidates:
@@ -203,7 +204,8 @@ def one_to_one_matches(
     for anchor_index, anchor in enumerate(anchors):
         if anchor_family and anchor.family != anchor_family:
             continue
-        start = bisect.bisect_left(candidate_times, anchor.time.timestamp() - seconds)
+        earliest = anchor.time.timestamp() if candidate_not_before_anchor else anchor.time.timestamp() - seconds
+        start = bisect.bisect_left(candidate_times, earliest)
         stop = bisect.bisect_right(candidate_times, anchor.time.timestamp() + seconds)
         for candidate_index in range(start, stop):
             candidate = candidates[candidate_index]
@@ -310,7 +312,7 @@ def parse_args() -> argparse.Namespace:
         "--dop-seconds",
         type=int,
         default=300,
-        help="maximum DOP-to-position join offset (default: %(default)s)",
+        help="maximum forward DOP-to-position join offset (default: %(default)s)",
     )
     parser.add_argument(
         "--vital-seconds",
@@ -341,7 +343,13 @@ def main() -> None:
         station = station or station_from_directory(directory)
         if not positions:
             continue
-        dops = one_to_one_matches(positions, dop_events(directory), args.dop_seconds, anchor_family="log_gps_records")
+        dops = one_to_one_matches(
+            positions,
+            dop_events(directory),
+            args.dop_seconds,
+            anchor_family="log_gps_records",
+            candidate_not_before_anchor=True,
+        )
         batteries = one_to_one_matches(positions, battery_events(directory), args.vital_seconds)
         internal_pressures, external_pressures = pressure_events(directory)
         internal_matches = one_to_one_matches(positions, internal_pressures, args.vital_seconds)

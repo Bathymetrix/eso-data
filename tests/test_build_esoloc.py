@@ -99,3 +99,34 @@ def test_negative_log_epoch_components_do_not_suppress_corrected_gps_anchor(tmp_
 
     assert command_matches == [None]
     assert upload_matches[0] is not None
+
+
+def test_dop_matching_never_uses_observation_before_gps_anchor() -> None:
+    first = tables.Event(
+        tables.timestamp("2018-06-27T19:15:33Z"),
+        "06_5B32904C.LOG",
+        (-14.453333, -179.485017),
+        "log_gps_records",
+    )
+    second = tables.Event(
+        tables.timestamp("2018-06-27T19:16:33Z"),
+        "06_5B32904C.LOG",
+        (-14.453400, -179.485033),
+        "log_gps_records",
+    )
+    dop = tables.Event(
+        tables.timestamp("2018-06-27T19:16:23Z"),
+        "06_5B32904C.LOG",
+        (0.600, 0.920),
+        "log_gps_records",
+    )
+
+    matches = tables.one_to_one_matches(
+        [first, second],
+        [dop],
+        300,
+        anchor_family="log_gps_records",
+        candidate_not_before_anchor=True,
+    )
+
+    assert matches == [dop, None]
